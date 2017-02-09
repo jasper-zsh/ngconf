@@ -1,0 +1,27 @@
+{
+  "name": "ngconf",
+  "version": "0.0.0",
+  "author": {
+    "name": "Zhang Sihao",
+    "email": "spirit.line.523@gmail.com",
+    "url": "http://www.agarage.org"
+  },
+  "description": "A new generation distribute configuration component.",
+  "keywords": [
+    "config",
+    "distribute"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jasonz93/ngconf.git"
+  },
+  "dependencies": {
+    "lodash": "^4.17.4",
+    "node-etcd": "^5.0.3"
+  },
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "mocha": "^3.2.0"
+  }
+}
