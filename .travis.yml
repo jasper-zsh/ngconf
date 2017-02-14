@@ -3,6 +3,8 @@ node_js:
   - "6"
 addons:
   apt:
+    sources:
+    - ppa:adilson/golang
     packages:
     - etcd
 before_install:
