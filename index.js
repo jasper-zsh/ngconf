@@ -26,8 +26,27 @@ function NgConf(etcd, namespace, options) {
     this._watchers = {};
 }
 
+NgConf.prototype.setLocalProfileContent = function (profile, name, content) {
+    if (!this._localCache) {
+        this._localCache = {};
+    }
+    if (!this._localCache[profile]) {
+        this._localCache[profile] = {};
+    }
+    this._localCache[profile][name] = content;
+};
+
+NgConf.prototype.setLocalProfilePath = function (profile, name, filepath) {
+    if (!this._localPaths) {
+        this._localPaths = {};
+    }
+    if (!this._localPaths[profile]) {
+        this._localPaths[profile] = {};
+    }
+    this._localPaths[profile][name] = filepath;
+};
+
 NgConf.prototype.local = function (profiles) {
-    this._local = {};
     var that = this;
     let setNotExist = deasync(function (key, value, callback) {
         that._etcd.compareAndSwap(key, value, ' ', {prevExist: false}, function (err) {
@@ -45,21 +64,23 @@ NgConf.prototype.local = function (profiles) {
             let files = readDirectory(content);
             for (let filename in files) {
                 let file = files[filename];
-                result[path.relative(content, filename)] = file;
-                that._local[path.join('/', path.relative(content, filename))] = filename;
+                let key = path.join('/', path.relative(content, filename));
+                result[key] = file;
+                that.setLocalProfilePath(profile, key, filename);
             }
         } else if (typeof content === 'object') {
             //Assign configs manually
-            for (let filename in content) {
-                let realpath = content[filename];
+            for (let key in content) {
+                let realpath = content[key];
                 if (fs.existsSync(realpath)) {
-                    result[filename] = fs.readFileSync(realpath);
-                    that._local[filename] = realpath;
+                    result[key] = fs.readFileSync(realpath);
+                    that.setLocalProfilePath(profile, key, realpath);
                 }
             }
         }
-        for (let name in result) {
-            setNotExist(path.join('/', this._namespace, profile, name), result[name]);
+        for (let key in result) {
+            setNotExist(path.join('/', this._namespace, profile, key), result[key]);
+            that.setLocalProfileContent(profile, key, result[key]);
         }
     }
 };
@@ -88,8 +109,9 @@ NgConf.prototype.persist = function (name, value, callback) {
 
         }
     }
-    if (this._local[name]) {
-        fs.writeFile(this._local[name], value, callback);
+    let key = path.join('/', name);
+    if (this._localPaths[this._profile][key]) {
+        fs.writeFile(this._localPaths[this._profile][key], value, callback);
     } else {
         callback(null, null);
     }
