@@ -13,6 +13,7 @@ function NgConf(etcd, namespace, options) {
     this._etcd = new Etcd(etcd);
     this._namespace = namespace;
     let _defaults = {
+        localOnly: false,
         profile: function () {
             return process.env.NODE_ENV || 'development';
         }
@@ -33,7 +34,7 @@ NgConf.prototype.setLocalProfileContent = function (profile, name, content) {
     if (!this._localCache[profile]) {
         this._localCache[profile] = {};
     }
-    this._localCache[profile][name] = content;
+    this._localCache[profile][name] = content.toString();
 };
 
 NgConf.prototype.setLocalProfilePath = function (profile, name, filepath) {
@@ -79,7 +80,9 @@ NgConf.prototype.local = function (profiles) {
             }
         }
         for (let key in result) {
-            setNotExist(path.join('/', this._namespace, profile, key), result[key]);
+            if (!this._options.localOnly) {
+                setNotExist(path.join('/', this._namespace, profile, key), result[key]);
+            }
             that.setLocalProfileContent(profile, key, result[key]);
         }
     }
@@ -119,11 +122,20 @@ NgConf.prototype.persist = function (name, value, callback) {
 
 NgConf.prototype.raw = function (name, callback, watcher) {
     var that = this;
-    let urlPath = path.join('/', this._namespace, this._profile, name);
+    let key = path.join("/", name);
+    let urlPath = path.join('/', this._namespace, this._profile, key);
+    if (this._options.localOnly) {
+        if (this._localCache[this._profile][key]) {
+            callback(null, this._localCache[this._profile][key]);
+        } else {
+            callback(new Error('Failed to load local cache.'));
+        }
+        return;
+    }
     this._etcd.get(urlPath, function (err, data) {
         if (err) {
-            if (that._local[name]) {
-                fs.readFile(that._local[name], callback);
+            if (that._localCache[that._profile][key]) {
+                callback(null, that._localCache[that._profile][key]);
             } else {
                 callback(err);
             }

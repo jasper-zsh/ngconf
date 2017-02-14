@@ -7,11 +7,13 @@ const NgConf = require('../');
 const path = require('path');
 const expect = require('chai').expect;
 
-describe('Base tests', function () {
+describe('Local only tests', function () {
     var ngconf;
 
     it('Initialize with default options', function () {
-        ngconf = new NgConf('http://127.0.0.1:2379', 'ngconf_test');
+        ngconf = new NgConf('', 'ngconf_test', {
+            localOnly: true
+        });
         expect(ngconf._namespace).to.be.equal('ngconf_test', 'Namespace not initialized');
         expect(ngconf._profile).to.be.equal('development', 'Profile not initialized');
     });
