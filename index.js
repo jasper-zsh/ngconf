@@ -179,4 +179,9 @@ NgConf.prototype.json = function (name, callback, watcher) {
     })
 };
 
+NgConf.prototype.set = function (profile, name, data, callback) {
+    this._etcd.set(path.join('/', this._namespace, profile, name), data, callback);
+};
+
+
 module.exports = NgConf;

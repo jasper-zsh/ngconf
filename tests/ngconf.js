@@ -28,7 +28,7 @@ describe('Base tests', function () {
             '/test.conf': path.join(__dirname, '..', 'examples', 'test.conf'),
             '/test.json': path.join(__dirname, '..', 'examples', 'test.json')
         })
-    })
+    });
 
     it('Read raw file', function (done) {
         ngconf.raw('test.conf', function (err, data) {
@@ -36,7 +36,7 @@ describe('Base tests', function () {
             expect(data).to.be.equal(ngconf._localCache.development['/test.conf'])
             done();
         });
-    })
+    });
 
     it('Read json file', function (done) {
         ngconf.json('test.json', function (err, data) {
@@ -44,5 +44,32 @@ describe('Base tests', function () {
             expect(data).to.deep.equal(JSON.parse(ngconf._localCache.development['/test.json']));
             done();
         })
+    });
+
+    it('Set raw file', function (done) {
+        ngconf.set('development', 'testchange.json', '{"changed":"raw file"}', function (err) {
+            expect(err).to.be.equal(null);
+            done();
+        })
+    });
+
+    it('Watch json file', function (done) {
+        var watched = false;
+        ngconf.json('testchange.json', function (err, data) {
+            expect(data).to.deep.equal({
+                changed: 'raw file'
+            });
+            data.watched = true;
+            ngconf.set('development', 'testchange.json', JSON.stringify(data), function (err, response) {
+                expect(err).to.be.equal(null);
+            })
+        }, function (data) {
+            watched = true;
+            expect(data.watched).to.be.equal(true);
+            done();
+        });
+        setTimeout(function () {
+            expect(watched).to.be.equal(true);
+        }, 1000);
     })
 });
