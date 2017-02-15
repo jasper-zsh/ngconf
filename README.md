@@ -1,4 +1,6 @@
 # ngconf
+[![Build Status](https://travis-ci.org/jasonz93/ngconf.svg?branch=master)](https://travis-ci.org/jasonz93/ngconf)
+
 A new generation distribute configuration component used etcd, currently for Node.JS
 
 ## Quick Start
