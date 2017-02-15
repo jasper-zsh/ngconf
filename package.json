@@ -22,10 +22,12 @@
   },
   "devDependencies": {
     "chai": "^3.5.0",
+    "coveralls": "^2.11.16",
     "istanbul": "^0.4.5",
     "mocha": "^3.2.0"
   },
   "scripts": {
-    "test": "./node_modules/.bin/istanbul cover ./node_modules/.bin/_mocha -- tests"
+    "test": "./node_modules/.bin/istanbul cover ./node_modules/.bin/_mocha -- tests",
+    "coveralls": "cat ./coverage/lcov.info | ./node_modules/.bin/coveralls"
   }
 }
