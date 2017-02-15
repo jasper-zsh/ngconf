@@ -1,14 +1,12 @@
 language: "node_js"
 node_js:
   - "6"
-addons:
-  apt:
-    sources:
-    - ppa:adilson/golang
-    packages:
-    - etcd
 before_install:
-  - "service etcd start"
+  - "wget https://github.com/coreos/etcd/releases/download/v3.0.11/etcd-v3.0.11-linux-amd64.tar.gz"
+  - "tar xvf etcd-v3.0.11-linux-amd64.tar.gz"
+  - "cd etcd-v3.0.11-linux-amd64"
+  - "chmod +x etcd"
+  - "./etcd &"
 install:
   - "npm install"
 script:
