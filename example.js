@@ -14,11 +14,11 @@ ngconf.local({
     }
 });
 
-ngconf.raw('/test.conf', readResult, watcherResult);
+ngconf.raw('/test.conf', watcherResult).then(readResult);
 
-ngconf.json('/test.json', readResult, watcherResult);
+ngconf.json('/test.json', watcherResult).then(readResult);
 
-function readResult(err, data) {
+function readResult(data) {
     console.log('This is read result.', data);
 }
 

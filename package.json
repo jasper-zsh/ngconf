@@ -17,6 +17,7 @@
     "url": "https://github.com/jasonz93/ngconf.git"
   },
   "dependencies": {
+    "arguejs": "^0.2.3",
     "lodash": "^4.17.4",
     "node-etcd": "^5.0.3"
   },

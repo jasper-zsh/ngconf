@@ -8,6 +8,7 @@ const _ = require('lodash');
 const path = require('path');
 const fs = require('fs');
 const deasync = require('deasync');
+const arguejs = require('arguejs');
 
 function NgConf(etcd, namespace, options) {
     this._etcd = new Etcd(etcd);
@@ -106,81 +107,103 @@ function readDirectory(file, parent) {
     return result;
 }
 
-NgConf.prototype.persist = function (name, value, callback) {
-    if (!callback) {
-        callback = function () {
-
-        }
-    }
-    let key = path.join('/', name);
-    if (this._localPaths[this._profile][key]) {
-        fs.writeFile(this._localPaths[this._profile][key], value, callback);
-    } else {
-        callback(null, null);
-    }
-};
-
-NgConf.prototype.raw = function (name, callback, watcher) {
-    var that = this;
-    let key = path.join("/", name);
-    let urlPath = path.join('/', this._namespace, this._profile, key);
-    if (this._options.localOnly) {
-        if (this._localCache[this._profile][key]) {
-            callback(null, this._localCache[this._profile][key]);
+NgConf.prototype.persist = function (name, value) {
+    let args = arguejs({
+        name: String,
+        value: String
+    }, arguments);
+    return new Promise((resolve, reject) => {
+        let key = path.join('/', name);
+        if (this._localPaths[this._profile][key]) {
+            fs.writeFile(this._localPaths[this._profile][key], value, (err, data) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve();
+                }
+            });
         } else {
-            callback(new Error('Failed to load local cache.'));
-        }
-        return;
-    }
-    this._etcd.get(urlPath, function (err, data) {
-        if (err) {
-            if (that._localCache[that._profile][key]) {
-                callback(null, that._localCache[that._profile][key]);
-            } else {
-                callback(err);
-            }
-        } else {
-            let version = data.node.modifiedIndex;
-            that.persist(name, data.node.value);
-            callback(null, data.node.value);
-        }
-    });
-    if (typeof watcher === 'function') {
-        let _watcher;
-        if (!this._watchers[name]) {
-            _watcher = this._etcd.watcher(urlPath);
-            this._watchers[name] = _watcher;
-        } else {
-            _watcher = this._watchers[name];
-        }
-        _watcher.on('change', function (data) {
-            let version = data.node.modifiedIndex;
-            switch (data.action) {
-                case 'set':
-                    that.persist(name, data.node.value);
-                    watcher(data.node.value);
-                    break;
-            }
-        });
-    }
-};
-
-NgConf.prototype.json = function (name, callback, watcher) {
-    this.raw(name, function (err, data) {
-        if (err) {
-            callback(err);
-        } else {
-            callback(null, JSON.parse(data));
-        }
-    }, function (data) {
-        if (typeof watcher === 'function') {
-            watcher(JSON.parse(data));
+            resolve();
         }
     })
 };
 
-NgConf.prototype.set = function (profile, name, data, callback) {
-    this._etcd.set(path.join('/', this._namespace, profile, name), data, callback);
+NgConf.prototype.raw = function (name, watcher) {
+    let args = arguejs({
+        name: String,
+        watcher: [Function, [null]]
+    }, arguments);
+    var that = this;
+    return new Promise((resolve, reject) => {
+        let key = path.join("/", name);
+        let urlPath = path.join('/', this._namespace, this._profile, key);
+        if (this._options.localOnly) {
+            if (this._localCache[this._profile][key]) {
+                return resolve(this._localCache[this._profile][key]);
+            } else {
+                return reject(new Error('Failed to load local cache.'));
+            }
+        }
+        this._etcd.get(urlPath, function (err, data) {
+            if (err) {
+                if (that._localCache[that._profile][key]) {
+                    return resolve(that._localCache[that._profile][key]);
+                } else {
+                    return reject(err);
+                }
+            } else {
+                let version = data.node.modifiedIndex;
+                that.persist(name, data.node.value).then(() => {
+                    resolve(data.node.value);
+                }).catch(reject);
+            }
+        });
+        if (args.watcher) {
+            let _watcher;
+            if (!this._watchers[name]) {
+                _watcher = this._etcd.watcher(urlPath);
+                this._watchers[name] = _watcher;
+            } else {
+                _watcher = this._watchers[name];
+            }
+            _watcher.on('change', function (data) {
+                let version = data.node.modifiedIndex;
+                switch (data.action) {
+                    case 'compareAndSwap':
+                    case 'set':
+                        that.persist(name, data.node.value);
+                        watcher(data.node.value);
+                        break;
+                }
+            });
+        }
+    })
+};
+
+NgConf.prototype.json = function (name, watcher) {
+    let args = arguejs({
+        name: String,
+        watcher: [Function, [null]]
+    }, arguments)
+    return this.raw(name, (data) => {
+        if (args.watcher) {
+            args.watcher(JSON.parse(data));
+        }
+    }).then((data) => {
+        return JSON.parse(data);
+    });
+};
+
+NgConf.prototype.set = function (profile, name, data) {
+    return new Promise((resolve, reject) => {
+        this._etcd.set(path.join('/', this._namespace, profile, name), data, (err, data) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    })
 };
 
 
