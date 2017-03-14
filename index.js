@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const deasync = require('deasync');
 const arguejs = require('arguejs');
+const Promise = require('bluebird');
 
 function NgConf(etcd, namespace, options) {
     this._etcd = new Etcd(etcd);
