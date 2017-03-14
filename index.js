@@ -137,7 +137,7 @@ NgConf.prototype.raw = function (name, watcher) {
     var that = this;
     return new Promise((resolve, reject) => {
         let key = path.join("/", name);
-        let urlPath = path.join('/', this._namespace, this._profile, key);
+        let urlPath = path.join('/ngconf', this._namespace, this._profile, key);
         if (this._options.localOnly) {
             if (this._localCache[this._profile][key]) {
                 return resolve(this._localCache[this._profile][key]);
@@ -197,7 +197,7 @@ NgConf.prototype.json = function (name, watcher) {
 
 NgConf.prototype.set = function (profile, name, data) {
     return new Promise((resolve, reject) => {
-        this._etcd.set(path.join('/', this._namespace, profile, name), data, (err, data) => {
+        this._etcd.set(path.join('/ngconf', this._namespace, profile, name), data, (err, data) => {
             if (err) {
                 reject(err);
             } else {

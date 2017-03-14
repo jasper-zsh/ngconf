@@ -1,6 +1,6 @@
 {
   "name": "ngconf",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "author": {
     "name": "Zhang Sihao",
     "email": "spirit.line.523@gmail.com",
@@ -30,7 +30,7 @@
   },
   "scripts": {
     "debug": "node-debug node_modules/mocha/bin/_mocha",
-    "test": "./node_modules/.bin/istanbul cover ./node_modules/.bin/_mocha -- tests",
+    "test": "./node_modules/.bin/istanbul cover ./node_modules/.bin/_mocha",
     "coveralls": "cat ./coverage/lcov.info | ./node_modules/.bin/coveralls"
   }
 }
