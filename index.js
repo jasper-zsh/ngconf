@@ -4,17 +4,14 @@
 'use strict';
 
 const Etcd = require('etcd-cli');
-const _ = require('lodash');
 const path = require('path');
-const fs = require('fs');
-const deasync = require('deasync');
+const _ = require('lodash');
 const arguejs = require('arguejs');
 const Promise = require('bluebird');
 const events = require('events');
 const util = require('util');
+const Cache = require('./lib/cache');
 const bunyan = require('bunyan');
-
-Promise.promisifyAll(fs);
 
 function NgConf(etcd, namespace, options) {
     events.EventEmitter.apply(this);
@@ -42,252 +39,167 @@ function NgConf(etcd, namespace, options) {
         });
     }
     this._watchers = {};
-    this.initCache().then(() => {
+    this._cache = new Cache({
+        localPath: this._options.localPath,
+        cachePath: this._options.cachePath,
+        logger: this._logger
+    });
+    this._version = null;
+    this._inited = false;
+    this._remoteOnly = false;
+    this._connected = false;
+    this._cache.init().then(() => {
+        // Initialize remote configs
+        return this.initRemote();
+    }).then(() => {
+        // Create version watcher
+        //TODO: Watch from exact index
+        return this._etcd.watcher(path.join('/', this._namespace, this._profile, 'version')).then((watcher) => {
+            this._watcher = watcher;
+            watcher.on('change', (data) => {
+                this._logger.info('Profile version changed to %s, loading new profile.', data.node.value);
+                this.loadVersion(data.node.value).then(() => {
+                    this._logger.info('New profile version %d loaded.', this._version);
+                    this.emit('change');
+                })
+            })
+        })
+    }).then(() => {
+        this._inited = true;
         this.emit('init');
     })
 }
 
 util.inherits(NgConf, events.EventEmitter);
 
-NgConf.prototype.initCache = function () {
-    let recursiveFunc = (root, dirPath) => {
-        return fs.readdirAsync(path.join(root, dirPath)).then((filenames) => {
+NgConf.prototype.loadVersion = function (version) {
+    return this._etcd.get(path.join('/', this._namespace, this._profile, 'versions', String(version)), {
+        recursive: true
+    }).then((data) => {
+        this._logger.debug('Got config version %d data %s', version, data);
+        return this._cache.sync(this.buildCacheItems(data.node));
+    })
+};
+
+NgConf.prototype.initRemote = function () {
+    return this._etcd.get(path.join('/', this._namespace, this._profile, 'version')).then((data) => {
+        // Load current version
+        this._version = Number(data.node.value);
+        this._logger.info('Got current version %d, loading', this._version);
+        return this.loadVersion(this._version).then(() => {
+            this._logger.info('Version %d loaded.', this._version);
+        });
+    }).catch((err) => {
+        if (err.errorCode === 100) {
+            // Profile does not exist, initialize it.
+            this._logger.info('Remote profile %s does not exist in project %s, initializing.', this._profile, this._namespace);
             let promises = [];
-            filenames.forEach((filename) => {
-                let filepath = path.join(root, dirPath, filename);
-                let cachepath = path.join(this._options.cachePath, dirPath, filename);
-                promises.push(fs.accessAsync(cachepath, fs.constants.F_OK).then(() => {
-                    return fs.statAsync(filepath).then((stat) => {
-                        if (stat.isDirectory()) {
-                            return recursiveFunc(root, path.join(dirPath, filename));
+            let localConfigs = this._cache.getAll();
+            if (!this._cache.getProfile(this._profile)) {
+                throw new Error('Local profile does not exist.');
+            }
+            for (let profile in localConfigs) {
+                let configs = localConfigs[profile];
+                for (let name in configs) {
+                    promises.push(this._etcd.set(path.join('/', this._namespace, profile, 'versions', '0', name), configs[name], {
+                        prevExist: false
+                    }).then((data) => {
+                        this._logger.debug('Key %s set.', data.node.key);
+                    }).catch((err) => {
+                        if (err.errorCode !== 105) {
+                            throw err;
                         }
-                    })
+                        this._logger.debug('Key %s has been set by other process, ignore.', err.cause);
+                    }))
+                }
+                promises.push(this._etcd.set(path.join('/', this._namespace, profile, 'version'), '0', {
+                    prevExist: false
                 }).catch((err) => {
-                    return fs.statAsync(filepath).then((stat) => {
-                        if (stat.isDirectory()) {
-                            return fs.mkdirAsync(cachepath).then(() => {
-                                this._logger.debug('Cache config dir %s does not exists, created.', filepath);
-                            });
-                        } else {
-                            return new Promise((resolve, reject) => {
-                                let readStream = fs.createReadStream(filepath);
-                                let writeStream = fs.createWriteStream(cachepath);
-                                readStream.pipe(writeStream);
-                                readStream.on('end', () => {
-                                    writeStream.end();
-                                    resolve();
-                                });
-                                readStream.on('error', reject);
-                                writeStream.on('error', reject);
-                            }).then(() => {
-                                this._logger.debug('Cache config file %s does not exist, copied.', filepath);
-                            })
-                        }
-                    })
-                }));
-            });
-            return Promise.all(promises);
-        })
-    };
-    return fs.accessAsync(this._options.cachePath, fs.constants.F_OK).catch((err) => {
-        return fs.mkdirAsync(this._options.cachePath).then(() => {
-            this._logger.debug('Cache dir %s does not exist, created', this._options.cachePath);
-        })
-    }).then(recursiveFunc(this._options.localPath, '.'))
-        .then(() => {
-            return this._etcd.get(path.join('/', this._namespace, this._profile, version)).catch((err) => {
-                if (err.errorCode === 100) {
-                    return 0;
-                } else {
-                    throw err;
-                }
-            }).then((version) => {
-
+                    if (err.errorCode !== 105) {
+                        throw err;
+                    }
+                    this._logger.debug('Version key %s has been initialized by other process, ignore.', err.cause);
+                }).then((data) => {
+                    this._version = 0;
+                    this._logger.debug('Version key %s set.', data.node.key);
+                }))
+            }
+            return Promise.all(promises).then(() => {
+                this._logger.info('All remote profiles has been initialized.');
             })
-        })
-}
-
-NgConf.prototype.readFromCache = function (name) {
-
-}
-
-NgConf.prototype.setLocalProfileContent = function (profile, name, content) {
-    if (!this._localCache) {
-        this._localCache = {};
-    }
-    if (!this._localCache[profile]) {
-        this._localCache[profile] = {};
-    }
-    this._localCache[profile][name] = content.toString();
-};
-
-NgConf.prototype.setLocalProfilePath = function (profile, name, filepath) {
-    if (!this._localPaths) {
-        this._localPaths = {};
-    }
-    if (!this._localPaths[profile]) {
-        this._localPaths[profile] = {};
-    }
-    this._localPaths[profile][name] = filepath;
-};
-
-NgConf.prototype.local = function (profiles) {
-    var that = this;
-    let setNotExist = deasync(function (key, value, callback) {
-        that._etcd.compareAndSwap(key, value, ' ', {prevExist: false}, function (err) {
-            if (err) {
-                callback(null, false);
+        } else {
+            throw err;
+        }
+    }).then(() => {
+        this._logger.info('Remote profile initialized.');
+        this._connected = true;
+        this.emit('connected');
+    }).catch((err) => {
+        this._logger.warn('Failed to initialize remote profile, retry after 5s.');
+        this._connected = false;
+        this._cache.isProfileCached(this._profile).then((cached) => {
+            if (cached) {
+                this._logger.warn('This profile has been cached, use cached profile.');
+                this._remoteOnly = false;
             } else {
-                callback(null, true);
+                this._logger.warn('This profile has not been cached, reject all requests.');
+                this._remoteOnly = true;
             }
+            this._retryTimer = setTimeout(() => {
+                this.initRemote();
+            }, 5000);
         });
-    });
-    for (let profile in profiles) {
-        let content = profiles[profile];
-        let result = {};
-        if (typeof content === 'string') {
-            let files = readDirectory(content);
-            for (let filename in files) {
-                let file = files[filename];
-                let key = path.join('/', path.relative(content, filename));
-                result[key] = file;
-                that.setLocalProfilePath(profile, key, filename);
-            }
-        } else if (typeof content === 'object') {
-            //Assign configs manually
-            for (let key in content) {
-                let realpath = content[key];
-                if (fs.existsSync(realpath)) {
-                    result[key] = fs.readFileSync(realpath);
-                    that.setLocalProfilePath(profile, key, realpath);
-                }
-            }
-        }
-        for (let key in result) {
-            if (!this._options.localOnly) {
-                setNotExist(path.join('/', this._namespace, profile, key), result[key]);
-            }
-            that.setLocalProfileContent(profile, key, result[key]);
-        }
-    }
+    })
 };
 
-function readDirectory(file, parent) {
-    if (!parent) {
-        parent = '';
-    }
-    let fullpath = path.join(parent, file);
-    let stat = fs.lstatSync(fullpath);
-    let result = {};
-    if (stat.isDirectory()) {
-        let files = fs.readdirSync(file);
-        files.forEach(function (filename) {
-            result = _.merge(result, readDirectory(filename, path.join(parent, file)));
-        });
-    } else {
-        result[fullpath] = fs.readFileSync(fullpath);
-    }
-    return result;
-}
-
-NgConf.prototype.persist = function (name, value) {
-    let args = arguejs({
-        name: String,
-        value: String
-    }, arguments);
-    return new Promise((resolve, reject) => {
-        let key = path.join('/', name);
-        if (this._localPaths[this._profile][key]) {
-            fs.writeFile(this._localPaths[this._profile][key], value, (err, data) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve();
-                }
+NgConf.prototype.buildCacheItems = function (rootNode) {
+    let cacheItems = {};
+    cacheItems[this._profile] = {};
+    let extract = (node) => {
+        let result = [];
+        if (node.nodes) {
+            node.nodes.forEach((node) => {
+                extract(node).forEach((r) => {
+                    result.push(r);
+                })
             });
         } else {
-            resolve();
+            result.push({
+                name: node.key.substr(rootNode.key.length),
+                value: node.value
+            })
         }
-    })
-};
-
-NgConf.prototype.raw = function (name, watcher) {
-    let args = arguejs({
-        name: String,
-        watcher: [Function, [null]]
-    }, arguments);
-    var that = this;
-    return new Promise((resolve, reject) => {
-        let key = path.join("/", name);
-        let urlPath = path.join('/ngconf', this._namespace, this._profile, key);
-        if (this._options.localOnly) {
-            if (this._localCache[this._profile][key]) {
-                return resolve(this._localCache[this._profile][key]);
-            } else {
-                return reject(new Error('Failed to load local cache.'));
-            }
-        }
-        this._etcd.get(urlPath, function (err, data) {
-            if (err) {
-                if (that._localCache[that._profile][key]) {
-                    return resolve(that._localCache[that._profile][key]);
-                } else {
-                    return reject(err);
-                }
-            } else {
-                let version = data.node.modifiedIndex;
-                that.persist(name, data.node.value).then(() => {
-                    resolve(data.node.value);
-                }).catch(reject);
-            }
-        });
-        if (args.watcher) {
-            let _watcher;
-            if (!this._watchers[name]) {
-                _watcher = this._etcd.watcher(urlPath);
-                this._watchers[name] = _watcher;
-            } else {
-                _watcher = this._watchers[name];
-            }
-            _watcher.on('change', function (data) {
-                let version = data.node.modifiedIndex;
-                switch (data.action) {
-                    case 'compareAndSwap':
-                    case 'set':
-                        that.persist(name, data.node.value);
-                        watcher(data.node.value);
-                        break;
-                }
-            });
-        }
-    })
-};
-
-NgConf.prototype.json = function (name, watcher) {
-    let args = arguejs({
-        name: String,
-        watcher: [Function, [null]]
-    }, arguments)
-    return this.raw(name, (data) => {
-        if (args.watcher) {
-            args.watcher(JSON.parse(data));
-        }
-    }).then((data) => {
-        return JSON.parse(data);
+        return result;
+    };
+    rootNode.nodes.forEach((node) => {
+        extract(node).forEach((config) => {
+            cacheItems[this._profile][config.name] = config.value;
+        })
     });
+    return cacheItems;
 };
 
-NgConf.prototype.set = function (profile, name, data) {
-    return new Promise((resolve, reject) => {
-        this._etcd.set(path.join('/ngconf', this._namespace, profile, name), data, (err, data) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve();
-            }
-        });
-    })
+NgConf.prototype.raw = function (name) {
+    if (!this._inited) {
+        throw new Error('NgConf not initialized.');
+    }
+    if (!this._connected && this._remoteOnly) {
+        throw new Error('Not initialized before and cannot connect to etcd');
+    }
+    let args = arguejs({
+        name: String
+    }, arguments);
+    if (args.name.indexOf('/') !== 0) {
+        args.name = '/' + args.name;
+    }
+    return this._cache.get(this._profile, args.name);
 };
 
+NgConf.prototype.json = function (name) {
+    let args = arguejs({
+        name: String
+    }, arguments);
+    return JSON.parse(this.raw(args.name));
+};
 
 module.exports = NgConf;

@@ -7,11 +7,21 @@ const Etcd = require('etcd-cli');
 
 describe('Cache tests', () => {
     it('Test init cache', function () {
-        let etcd = new Etcd.V2HTTPClient('127.0.0.1:2379');
-        let cache = new Cache(etcd, {
+        let cache = new Cache({
             localPath: './examples'
-        })
+        });
         return cache.init().then(() => {
+
+        });
+    })
+
+    it('Test sync cache', function () {
+        let cache = new Cache({
+            localPath: './examples'
+        });
+        return cache.init().then(() => {
+            return cache.sync(cache._cache);
+        }).then(() => {
 
         });
     })
