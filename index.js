@@ -3,22 +3,30 @@
  */
 'use strict';
 
-const Etcd = require('node-etcd');
+const Etcd = require('etcd-cli');
 const _ = require('lodash');
 const path = require('path');
 const fs = require('fs');
 const deasync = require('deasync');
 const arguejs = require('arguejs');
 const Promise = require('bluebird');
+const events = require('events');
+const util = require('util');
+const bunyan = require('bunyan');
+
+Promise.promisifyAll(fs);
 
 function NgConf(etcd, namespace, options) {
-    this._etcd = new Etcd(etcd);
+    events.EventEmitter.apply(this);
+    this._etcd = new Etcd.V2HTTPClient(etcd);
     this._namespace = namespace;
     let _defaults = {
         localOnly: false,
         profile: function () {
             return process.env.NODE_ENV || 'development';
-        }
+        },
+        cachePath: './cache',
+        localPath: './config'
     };
     this._options = _.defaultsDeep(options, _defaults);
     if (typeof this._options.profile === 'function') {
@@ -26,7 +34,81 @@ function NgConf(etcd, namespace, options) {
     } else {
         this._profile = this._options.profile;
     }
+    if (this._options.logger) {
+        this._logger = this._options.logger;
+    } else {
+        this._logger = bunyan.createLogger({
+            name: 'NgConf'
+        });
+    }
     this._watchers = {};
+    this.initCache().then(() => {
+        this.emit('init');
+    })
+}
+
+util.inherits(NgConf, events.EventEmitter);
+
+NgConf.prototype.initCache = function () {
+    let recursiveFunc = (root, dirPath) => {
+        return fs.readdirAsync(path.join(root, dirPath)).then((filenames) => {
+            let promises = [];
+            filenames.forEach((filename) => {
+                let filepath = path.join(root, dirPath, filename);
+                let cachepath = path.join(this._options.cachePath, dirPath, filename);
+                promises.push(fs.accessAsync(cachepath, fs.constants.F_OK).then(() => {
+                    return fs.statAsync(filepath).then((stat) => {
+                        if (stat.isDirectory()) {
+                            return recursiveFunc(root, path.join(dirPath, filename));
+                        }
+                    })
+                }).catch((err) => {
+                    return fs.statAsync(filepath).then((stat) => {
+                        if (stat.isDirectory()) {
+                            return fs.mkdirAsync(cachepath).then(() => {
+                                this._logger.debug('Cache config dir %s does not exists, created.', filepath);
+                            });
+                        } else {
+                            return new Promise((resolve, reject) => {
+                                let readStream = fs.createReadStream(filepath);
+                                let writeStream = fs.createWriteStream(cachepath);
+                                readStream.pipe(writeStream);
+                                readStream.on('end', () => {
+                                    writeStream.end();
+                                    resolve();
+                                });
+                                readStream.on('error', reject);
+                                writeStream.on('error', reject);
+                            }).then(() => {
+                                this._logger.debug('Cache config file %s does not exist, copied.', filepath);
+                            })
+                        }
+                    })
+                }));
+            });
+            return Promise.all(promises);
+        })
+    };
+    return fs.accessAsync(this._options.cachePath, fs.constants.F_OK).catch((err) => {
+        return fs.mkdirAsync(this._options.cachePath).then(() => {
+            this._logger.debug('Cache dir %s does not exist, created', this._options.cachePath);
+        })
+    }).then(recursiveFunc(this._options.localPath, '.'))
+        .then(() => {
+            return this._etcd.get(path.join('/', this._namespace, this._profile, version)).catch((err) => {
+                if (err.errorCode === 100) {
+                    return 0;
+                } else {
+                    throw err;
+                }
+            }).then((version) => {
+
+            })
+        })
+}
+
+NgConf.prototype.readFromCache = function (name) {
+
 }
 
 NgConf.prototype.setLocalProfileContent = function (profile, name, content) {
