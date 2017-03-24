@@ -13,19 +13,21 @@ const util = require('util');
 const Cache = require('./lib/cache');
 const bunyan = require('bunyan');
 
-function NgConf(etcd, namespace, options) {
+function NgConf(etcd, project, options) {
     events.EventEmitter.apply(this);
     this._etcd = new Etcd.V2HTTPClient(etcd);
-    this._namespace = namespace;
+    this._project = project;
     let _defaults = {
         localOnly: false,
         profile: function () {
             return process.env.NODE_ENV || 'development';
         },
         cachePath: './cache',
-        localPath: './config'
+        localPath: './config',
+        namespace: 'ngconf'
     };
     this._options = _.defaultsDeep(options, _defaults);
+    this._namespace = this._options.namespace;
     if (typeof this._options.profile === 'function') {
         this._profile = this._options.profile();
     } else {
@@ -54,7 +56,7 @@ function NgConf(etcd, namespace, options) {
     }).then(() => {
         // Create version watcher
         //TODO: Watch from exact index
-        return this._etcd.watcher(path.join('/', this._namespace, this._profile, 'version')).then((watcher) => {
+        return this._etcd.watcher(path.join('/', this._namespace, this._project, this._profile, 'version')).then((watcher) => {
             this._watcher = watcher;
             watcher.on('change', (data) => {
                 this._logger.info('Profile version changed to %s, loading new profile.', data.node.value);
@@ -73,7 +75,7 @@ function NgConf(etcd, namespace, options) {
 util.inherits(NgConf, events.EventEmitter);
 
 NgConf.prototype.loadVersion = function (version) {
-    return this._etcd.get(path.join('/', this._namespace, this._profile, 'versions', String(version)), {
+    return this._etcd.get(path.join('/', this._namespace, this._project, this._profile, 'versions', String(version)), {
         recursive: true
     }).then((data) => {
         this._logger.debug('Got config version %d data %s', version, data);
@@ -82,7 +84,7 @@ NgConf.prototype.loadVersion = function (version) {
 };
 
 NgConf.prototype.initRemote = function () {
-    return this._etcd.get(path.join('/', this._namespace, this._profile, 'version')).then((data) => {
+    return this._etcd.get(path.join('/', this._namespace, this._project, this._profile, 'version')).then((data) => {
         // Load current version
         this._version = Number(data.node.value);
         this._logger.info('Got current version %d, loading', this._version);
@@ -101,7 +103,7 @@ NgConf.prototype.initRemote = function () {
             for (let profile in localConfigs) {
                 let configs = localConfigs[profile];
                 for (let name in configs) {
-                    promises.push(this._etcd.set(path.join('/', this._namespace, profile, 'versions', '0', name), configs[name], {
+                    promises.push(this._etcd.set(path.join('/', this._namespace, this._project, profile, 'versions', '0', name), configs[name], {
                         prevExist: false
                     }).then((data) => {
                         this._logger.debug('Key %s set.', data.node.key);
@@ -112,7 +114,7 @@ NgConf.prototype.initRemote = function () {
                         this._logger.debug('Key %s has been set by other process, ignore.', err.cause);
                     }))
                 }
-                promises.push(this._etcd.set(path.join('/', this._namespace, profile, 'version'), '0', {
+                promises.push(this._etcd.set(path.join('/', this._namespace, this._project, profile, 'version'), '0', {
                     prevExist: false
                 }).catch((err) => {
                     if (err.errorCode !== 105) {

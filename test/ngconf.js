@@ -22,7 +22,8 @@ describe('Base tests', function () {
                 level: 'debug'
             })
         });
-        expect(ngconf._namespace).to.be.equal('ngconf_test', 'Namespace not initialized');
+        expect(ngconf._project).to.be.equal('ngconf_test', 'Project not initialized');
+        expect(ngconf._namespace).to.be.equal('ngconf', 'Namespace not initialized');
         expect(ngconf._profile).to.be.equal('development', 'Profile not initialized');
         let dirEquals = (src, dest) => {
             return fs.readdirAsync(src).then((srcFiles) => {
